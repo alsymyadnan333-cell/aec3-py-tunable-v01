@@ -1,0 +1,23 @@
+[package]
+name = "aec3_py_tunable"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "aec3_py_tunable"
+crate-type = ["cdylib"]
+
+[dependencies]
+# PyO3 extension module
+pyo3 = { version = "0.27", features = ["extension-module"] }
+
+# NumPy bindings for PyO3
+numpy = "0.27"
+
+# AEC3 crate pinned strictly to 0.1.1
+aec3 = "=0.1.1"
+
+[profile.release]
+lto = true
+codegen-units = 1
+opt-level = "z"
