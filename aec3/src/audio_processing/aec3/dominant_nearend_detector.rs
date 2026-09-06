@@ -2,6 +2,22 @@ use crate::api::config::DominantNearendDetection;
 use crate::audio_processing::aec3::aec3_common::FFT_LENGTH_BY_2_PLUS_1;
 use crate::audio_processing::aec3::nearend_detector::NearendDetector;
 
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct DominantNearendDiagnostics {
+    pub echo_sum: f32,
+    pub ne_sum: f32,
+    pub noise_sum: f32,
+    pub echo_to_nearend_ratio: f32,
+    pub nearend_to_noise_ratio: f32,
+    pub trigger_counter: i32,
+    pub hold_counter: i32,
+    pub initial_state: bool,
+    pub nearend_state: bool,
+    pub enr_enter_margin: f32,
+    pub snr_enter_margin: f32,
+    pub exit_condition: bool,
+}
+
 pub struct DominantNearendDetector {
     enr_threshold: f32,
     enr_exit_threshold: f32,
@@ -13,6 +29,7 @@ pub struct DominantNearendDetector {
     nearend_state: bool,
     trigger_counters: Vec<i32>,
     hold_counters: Vec<i32>,
+    last_diagnostics: DominantNearendDiagnostics,
 }
 
 impl DominantNearendDetector {
@@ -29,6 +46,7 @@ impl DominantNearendDetector {
             nearend_state: false,
             trigger_counters: vec![0; num_capture_channels],
             hold_counters: vec![0; num_capture_channels],
+            last_diagnostics: DominantNearendDiagnostics::default(),
         }
     }
 
@@ -40,6 +58,10 @@ impl DominantNearendDetector {
 impl NearendDetector for DominantNearendDetector {
     fn is_nearend_state(&self) -> bool {
         self.nearend_state
+    }
+
+    fn diagnostics(&self) -> DominantNearendDiagnostics {
+        self.last_diagnostics
     }
 
     fn update(
@@ -59,10 +81,13 @@ impl NearendDetector for DominantNearendDetector {
             let echo_sum = Self::low_frequency_energy(&residual_echo_spectrum[ch]);
             let noise_sum = Self::low_frequency_energy(&comfort_noise_spectrum[ch]);
 
-            if (!initial_state || self.use_during_initial_phase)
+            let enr_margin = (self.enr_threshold * ne_sum) - echo_sum;
+            let snr_margin = ne_sum - (self.snr_threshold * noise_sum);
+            let enter_cond = (!initial_state || self.use_during_initial_phase)
                 && echo_sum < self.enr_threshold * ne_sum
-                && ne_sum > self.snr_threshold * noise_sum
-            {
+                && ne_sum > self.snr_threshold * noise_sum;
+
+            if enter_cond {
                 self.trigger_counters[ch] += 1;
                 if self.trigger_counters[ch] >= self.trigger_threshold {
                     self.hold_counters[ch] = self.hold_duration;
@@ -72,14 +97,33 @@ impl NearendDetector for DominantNearendDetector {
                 self.trigger_counters[ch] = (self.trigger_counters[ch] - 1).max(0);
             }
 
-            if echo_sum > self.enr_exit_threshold * ne_sum
-                && echo_sum > self.snr_threshold * noise_sum
-            {
+            let exit_cond = echo_sum > self.enr_exit_threshold * ne_sum
+                && echo_sum > self.snr_threshold * noise_sum;
+
+            if exit_cond {
                 self.hold_counters[ch] = 0;
             }
 
             self.hold_counters[ch] = (self.hold_counters[ch] - 1).max(0);
             self.nearend_state |= self.hold_counters[ch] > 0;
+
+            if ch == 0 {
+                self.last_diagnostics = DominantNearendDiagnostics {
+                    echo_sum,
+                    ne_sum,
+                    noise_sum,
+                    echo_to_nearend_ratio: if ne_sum > 1e-6 { echo_sum / ne_sum } else { 0.0 },
+                    nearend_to_noise_ratio: if noise_sum > 1e-6 { ne_sum / noise_sum } else { 0.0 },
+                    trigger_counter: self.trigger_counters[ch],
+                    hold_counter: self.hold_counters[ch],
+                    initial_state,
+                    nearend_state: self.nearend_state,
+                    enr_enter_margin: enr_margin,
+                    snr_enter_margin: snr_margin,
+                    exit_condition: exit_cond,
+                };
+            }
         }
     }
 }
+

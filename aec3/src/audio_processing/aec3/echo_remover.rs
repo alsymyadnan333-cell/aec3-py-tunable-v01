@@ -143,14 +143,26 @@ impl EchoRemover {
     }
 
     pub fn metrics(&self) -> Metrics {
+        let diag = self.suppression_gain.detector_diagnostics();
         Metrics {
             echo_return_loss: (-10.0f64) * f64::from(self.aec_state.erl_time_domain()).log10(),
             echo_return_loss_enhancement: f64::from(log2_to_db(
                 self.aec_state.fullband_erle_log2(),
             )),
             delay_ms: 0,
-            nearend_active: self.suppression_gain.is_nearend_state(),
+            nearend_active: diag.nearend_state,
             nearend_active_ratio: 0.0,
+            echo_sum: diag.echo_sum as f64,
+            ne_sum: diag.ne_sum as f64,
+            noise_sum: diag.noise_sum as f64,
+            echo_to_nearend_ratio: diag.echo_to_nearend_ratio as f64,
+            nearend_to_noise_ratio: diag.nearend_to_noise_ratio as f64,
+            trigger_counter: diag.trigger_counter,
+            hold_counter: diag.hold_counter,
+            initial_state: diag.initial_state,
+            enr_enter_margin: diag.enr_enter_margin as f64,
+            snr_enter_margin: diag.snr_enter_margin as f64,
+            exit_condition: diag.exit_condition,
         }
     }
 

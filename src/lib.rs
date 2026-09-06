@@ -24,6 +24,28 @@ pub struct PyMetrics {
     /// Cumulative near-end speech active ratio across all processed frames
     #[pyo3(get)]
     pub nearend_active_ratio: f64,
+    #[pyo3(get)]
+    pub echo_sum: f64,
+    #[pyo3(get)]
+    pub ne_sum: f64,
+    #[pyo3(get)]
+    pub noise_sum: f64,
+    #[pyo3(get)]
+    pub echo_to_nearend_ratio: f64,
+    #[pyo3(get)]
+    pub nearend_to_noise_ratio: f64,
+    #[pyo3(get)]
+    pub trigger_counter: i32,
+    #[pyo3(get)]
+    pub hold_counter: i32,
+    #[pyo3(get)]
+    pub initial_state: bool,
+    #[pyo3(get)]
+    pub enr_enter_margin: f64,
+    #[pyo3(get)]
+    pub snr_enter_margin: f64,
+    #[pyo3(get)]
+    pub exit_condition: bool,
 }
 
 impl From<RustMetrics> for PyMetrics {
@@ -34,6 +56,17 @@ impl From<RustMetrics> for PyMetrics {
             delay_ms: m.delay_ms,
             nearend_active: m.nearend_active,
             nearend_active_ratio: m.nearend_active_ratio,
+            echo_sum: m.echo_sum,
+            ne_sum: m.ne_sum,
+            noise_sum: m.noise_sum,
+            echo_to_nearend_ratio: m.echo_to_nearend_ratio,
+            nearend_to_noise_ratio: m.nearend_to_noise_ratio,
+            trigger_counter: m.trigger_counter,
+            hold_counter: m.hold_counter,
+            initial_state: m.initial_state,
+            enr_enter_margin: m.enr_enter_margin,
+            snr_enter_margin: m.snr_enter_margin,
+            exit_condition: m.exit_condition,
         }
     }
 }

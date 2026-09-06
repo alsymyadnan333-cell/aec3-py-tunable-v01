@@ -54,6 +54,6 @@ jobs:
       - name: Upload Wheel Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: aec3-py-tunable-cp312-windows-x64
+          name: aec3-py-diagnostic-cp312-windows-x64
           path: dist/*.whl
           if-no-files-found: error

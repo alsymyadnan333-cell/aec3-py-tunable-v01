@@ -3,7 +3,9 @@ use crate::audio_processing::aec3::aec_state::AecState;
 use crate::audio_processing::aec3::aec3_common::{
     Aec3Optimization, BLOCK_SIZE, FFT_LENGTH_BY_2, FFT_LENGTH_BY_2_MINUS_1, FFT_LENGTH_BY_2_PLUS_1,
 };
-use crate::audio_processing::aec3::dominant_nearend_detector::DominantNearendDetector;
+use crate::audio_processing::aec3::dominant_nearend_detector::{
+    DominantNearendDetector, DominantNearendDiagnostics,
+};
 use crate::audio_processing::aec3::moving_average::MovingAverage;
 use crate::audio_processing::aec3::nearend_detector::NearendDetector;
 use crate::audio_processing::aec3::render_signal_analyzer::RenderSignalAnalyzer;
@@ -85,6 +87,10 @@ impl SuppressionGain {
 
     pub fn is_nearend_state(&self) -> bool {
         self.nearend_detector.is_nearend_state()
+    }
+
+    pub fn detector_diagnostics(&self) -> DominantNearendDiagnostics {
+        self.nearend_detector.diagnostics()
     }
 
     pub fn set_initial_state(&mut self, state: bool) {

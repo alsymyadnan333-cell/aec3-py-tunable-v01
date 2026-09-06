@@ -8,6 +8,17 @@ pub struct Metrics {
     pub delay_ms: i32,
     pub nearend_active: bool,
     pub nearend_active_ratio: f64,
+    pub echo_sum: f64,
+    pub ne_sum: f64,
+    pub noise_sum: f64,
+    pub echo_to_nearend_ratio: f64,
+    pub nearend_to_noise_ratio: f64,
+    pub trigger_counter: i32,
+    pub hold_counter: i32,
+    pub initial_state: bool,
+    pub enr_enter_margin: f64,
+    pub snr_enter_margin: f64,
+    pub exit_condition: bool,
 }
 
 impl Default for Metrics {
@@ -18,6 +29,17 @@ impl Default for Metrics {
             delay_ms: 0,
             nearend_active: false,
             nearend_active_ratio: 0.0,
+            echo_sum: 0.0,
+            ne_sum: 0.0,
+            noise_sum: 0.0,
+            echo_to_nearend_ratio: 0.0,
+            nearend_to_noise_ratio: 0.0,
+            trigger_counter: 0,
+            hold_counter: 0,
+            initial_state: false,
+            enr_enter_margin: 0.0,
+            snr_enter_margin: 0.0,
+            exit_condition: false,
         }
     }
 }
