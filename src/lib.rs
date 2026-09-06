@@ -18,6 +18,12 @@ pub struct PyMetrics {
     /// Estimated delay (ms)
     #[pyo3(get)]
     pub delay_ms: i32,
+    /// Near-end speech active flag for the latest frame
+    #[pyo3(get)]
+    pub nearend_active: bool,
+    /// Cumulative near-end speech active ratio across all processed frames
+    #[pyo3(get)]
+    pub nearend_active_ratio: f64,
 }
 
 impl From<RustMetrics> for PyMetrics {
@@ -26,15 +32,13 @@ impl From<RustMetrics> for PyMetrics {
             echo_return_loss: m.echo_return_loss,
             echo_return_loss_enhancement: m.echo_return_loss_enhancement,
             delay_ms: m.delay_ms,
+            nearend_active: m.nearend_active,
+            nearend_active_ratio: m.nearend_active_ratio,
         }
     }
 }
 
 /// High-level wrapper around aec3::voip::VoipAec3, using NumPy arrays.
-///
-/// All frames are **1D interleaved float32** arrays with length:
-///   `frame_samples * channels`
-/// where `frame_samples` is per-channel samples for a 10 ms frame. :contentReference[oaicite:2]{index=2}
 #[pyclass(name = "Aec3", unsendable)]
 pub struct PyAec3 {
     inner: VoipAec3,
@@ -42,11 +46,17 @@ pub struct PyAec3 {
     render_channels: usize,
     capture_channels: usize,
     #[pyo3(get)]
-    export_linear_aec_output: bool,
-    #[pyo3(get)]
-    use_subband_nearend_detection: bool,
-    #[pyo3(get)]
     dominant_nearend_enr_threshold: f32,
+    #[pyo3(get)]
+    dominant_nearend_snr_threshold: f32,
+    #[pyo3(get)]
+    dominant_nearend_trigger_threshold: usize,
+    #[pyo3(get)]
+    dominant_nearend_hold_duration: usize,
+    #[pyo3(get)]
+    dominant_nearend_use_during_initial_phase: bool,
+    #[pyo3(get)]
+    dominant_nearend_enr_exit_threshold: f32,
     #[pyo3(get)]
     nearend_enr_transparent: f32,
 }
@@ -57,8 +67,7 @@ fn map_voip_err(err: VoipAec3Error) -> PyErr {
 
 fn bad_len(kind: &str, got: usize, expected: usize) -> PyErr {
     PyErr::new::<PyValueError, _>(format!(
-        "{kind} length {got} != expected {expected} \
-         (frame_samples * {kind}_channels)"
+        "{kind} length {got} != expected {expected} (frame_samples * {kind}_channels)"
     ))
 }
 
@@ -70,17 +79,6 @@ fn not_contiguous(kind: &str, e: impl std::fmt::Display) -> PyErr {
 
 #[pymethods]
 impl PyAec3 {
-    /// __init__(
-    ///   sample_rate_hz: int,
-    ///   render_channels: int,
-    ///   capture_channels: int,
-    ///   initial_delay_ms: Optional[int] = None,
-    ///   enable_high_pass: Optional[bool] = None,
-    ///   export_linear_aec_output: bool = False,
-    ///   use_subband_nearend_detection: bool = False,
-    ///   dominant_nearend_enr_threshold: Optional[float] = None,
-    ///   nearend_enr_transparent: Optional[float] = None,
-    /// )
     #[new]
     #[pyo3(
         signature = (
@@ -89,9 +87,12 @@ impl PyAec3 {
             capture_channels,
             initial_delay_ms = None,
             enable_high_pass = None,
-            export_linear_aec_output = false,
-            use_subband_nearend_detection = false,
             dominant_nearend_enr_threshold = None,
+            dominant_nearend_snr_threshold = None,
+            dominant_nearend_trigger_threshold = None,
+            dominant_nearend_hold_duration = None,
+            dominant_nearend_use_during_initial_phase = None,
+            dominant_nearend_enr_exit_threshold = None,
             nearend_enr_transparent = None,
         )
     )]
@@ -101,29 +102,69 @@ impl PyAec3 {
         capture_channels: usize,
         initial_delay_ms: Option<i32>,
         enable_high_pass: Option<bool>,
-        export_linear_aec_output: bool,
-        use_subband_nearend_detection: bool,
         dominant_nearend_enr_threshold: Option<f32>,
+        dominant_nearend_snr_threshold: Option<f32>,
+        dominant_nearend_trigger_threshold: Option<usize>,
+        dominant_nearend_hold_duration: Option<usize>,
+        dominant_nearend_use_during_initial_phase: Option<bool>,
+        dominant_nearend_enr_exit_threshold: Option<f32>,
         nearend_enr_transparent: Option<f32>,
     ) -> PyResult<Self> {
         let mut config = EchoCanceller3Config::default();
 
-        config.filter.export_linear_aec_output = export_linear_aec_output;
-        config.suppressor.use_subband_nearend_detection = use_subband_nearend_detection;
-
-        if let Some(thresh) = dominant_nearend_enr_threshold {
-            if !thresh.is_finite() || thresh <= 0.0 || thresh > 100.0 {
+        if let Some(val) = dominant_nearend_enr_threshold {
+            if !val.is_finite() || val <= 0.0 || val > 100.0 {
                 return Err(PyValueError::new_err(
-                    "dominant_nearend_enr_threshold must be a finite, positive float (0.0 < x <= 100.0)",
+                    "dominant_nearend_enr_threshold must be a finite, positive float between 0.0 and 100.0",
                 ));
             }
-            config.suppressor.dominant_nearend_detection.enr_threshold = thresh;
+            config.suppressor.dominant_nearend_detection.enr_threshold = val;
+        }
+
+        if let Some(val) = dominant_nearend_snr_threshold {
+            if !val.is_finite() || val <= 0.0 || val > 1000.0 {
+                return Err(PyValueError::new_err(
+                    "dominant_nearend_snr_threshold must be a finite, positive float between 0.0 and 1000.0",
+                ));
+            }
+            config.suppressor.dominant_nearend_detection.snr_threshold = val;
+        }
+
+        if let Some(val) = dominant_nearend_trigger_threshold {
+            if val < 1 || val > 500 {
+                return Err(PyValueError::new_err(
+                    "dominant_nearend_trigger_threshold must be between 1 and 500 blocks",
+                ));
+            }
+            config.suppressor.dominant_nearend_detection.trigger_threshold = val;
+        }
+
+        if let Some(val) = dominant_nearend_hold_duration {
+            if val < 1 || val > 5000 {
+                return Err(PyValueError::new_err(
+                    "dominant_nearend_hold_duration must be between 1 and 5000 blocks",
+                ));
+            }
+            config.suppressor.dominant_nearend_detection.hold_duration = val;
+        }
+
+        if let Some(val) = dominant_nearend_use_during_initial_phase {
+            config.suppressor.dominant_nearend_detection.use_during_initial_phase = val;
+        }
+
+        if let Some(val) = dominant_nearend_enr_exit_threshold {
+            if !val.is_finite() || val <= 0.0 || val > 100.0 {
+                return Err(PyValueError::new_err(
+                    "dominant_nearend_enr_exit_threshold must be a finite, positive float between 0.0 and 100.0",
+                ));
+            }
+            config.suppressor.dominant_nearend_detection.enr_exit_threshold = val;
         }
 
         if let Some(trans) = nearend_enr_transparent {
             if !trans.is_finite() || trans < 0.0 || trans > 100.0 {
                 return Err(PyValueError::new_err(
-                    "nearend_enr_transparent must be a finite, non-negative float (0.0 <= x <= 100.0)",
+                    "nearend_enr_transparent must be a finite, non-negative float between 0.0 and 100.0",
                 ));
             }
             config.suppressor.nearend_tuning.mask_lf.enr_transparent = trans;
@@ -132,8 +173,13 @@ impl PyAec3 {
             }
         }
 
-        let recorded_thresh = config.suppressor.dominant_nearend_detection.enr_threshold;
-        let recorded_trans = config.suppressor.nearend_tuning.mask_lf.enr_transparent;
+        let rec_enr = config.suppressor.dominant_nearend_detection.enr_threshold;
+        let rec_snr = config.suppressor.dominant_nearend_detection.snr_threshold;
+        let rec_trig = config.suppressor.dominant_nearend_detection.trigger_threshold;
+        let rec_hold = config.suppressor.dominant_nearend_detection.hold_duration;
+        let rec_init = config.suppressor.dominant_nearend_detection.use_during_initial_phase;
+        let rec_exit = config.suppressor.dominant_nearend_detection.enr_exit_threshold;
+        let rec_trans = config.suppressor.nearend_tuning.mask_lf.enr_transparent;
 
         let mut builder: VoipAec3Builder =
             VoipAec3::builder(sample_rate_hz, render_channels, capture_channels)
@@ -147,50 +193,61 @@ impl PyAec3 {
         }
 
         let pipeline = builder.build().map_err(map_voip_err)?;
-        let frame_samples = pipeline.frame_samples(); // per 10 ms, per channel
+        let frame_samples = pipeline.frame_samples();
 
         Ok(Self {
             inner: pipeline,
             frame_samples,
             render_channels,
             capture_channels,
-            export_linear_aec_output,
-            use_subband_nearend_detection,
-            dominant_nearend_enr_threshold: recorded_thresh,
-            nearend_enr_transparent: recorded_trans,
+            dominant_nearend_enr_threshold: rec_enr,
+            dominant_nearend_snr_threshold: rec_snr,
+            dominant_nearend_trigger_threshold: rec_trig,
+            dominant_nearend_hold_duration: rec_hold,
+            dominant_nearend_use_during_initial_phase: rec_init,
+            dominant_nearend_enr_exit_threshold: rec_exit,
+            nearend_enr_transparent: rec_trans,
         })
     }
 
-    /// Number of samples **per channel** in a 10 ms frame.
     #[getter]
     fn frame_samples(&self) -> usize {
         self.frame_samples
     }
 
-    /// Configured sample rate (Hz).
     #[getter]
     fn sample_rate_hz(&self) -> i32 {
         self.inner.sample_rate_hz()
     }
 
-    /// Update the audio buffer delay hint (ms).
-    ///
-    /// This is equivalent to `VoipAec3::set_audio_buffer_delay`. :contentReference[oaicite:4]{index=4}
+    #[getter]
+    fn is_nearend_active(&self) -> bool {
+        self.inner.is_nearend_active()
+    }
+
+    #[getter]
+    fn nearend_active_frames(&self) -> usize {
+        self.inner.nearend_active_frames()
+    }
+
+    #[getter]
+    fn total_frames(&self) -> usize {
+        self.inner.total_frames()
+    }
+
+    #[getter]
+    fn nearend_active_ratio(&self) -> f64 {
+        self.inner.nearend_active_ratio()
+    }
+
     fn set_audio_buffer_delay(&mut self, delay_ms: i32) {
         self.inner.set_audio_buffer_delay(delay_ms);
     }
 
-    /// Get current AEC metrics without processing a frame.
     fn metrics(&self) -> PyMetrics {
         PyMetrics::from(self.inner.metrics())
     }
 
-    /// Feed a far-end (render) frame into the pipeline.
-    ///
-    /// Parameters
-    /// ----------
-    /// render_frame : numpy.ndarray
-    ///     1D float32 array, length = frame_samples * render_channels
     fn handle_render_frame(&mut self, render_frame: PyReadonlyArray1<'_, f32>) -> PyResult<()> {
         let slice = render_frame
             .as_slice()
@@ -204,20 +261,6 @@ impl PyAec3 {
         self.inner.handle_render_frame(slice).map_err(map_voip_err)
     }
 
-    /// Process a capture (microphone) frame.
-    ///
-    /// Parameters
-    /// ----------
-    /// py : Python
-    /// capture_frame : numpy.ndarray
-    ///     1D float32 array, length = frame_samples * capture_channels
-    /// level_change : bool, optional
-    ///
-    /// Returns
-    /// -------
-    /// (out_frame, metrics)
-    ///   out_frame : numpy.ndarray (float32, same length as capture_frame)
-    ///   metrics   : Metrics
     #[pyo3(signature = (capture_frame, level_change=false))]
     fn process_capture_frame<'py>(
         &mut self,
@@ -244,22 +287,6 @@ impl PyAec3 {
         Ok((out_array, PyMetrics::from(metrics)))
     }
 
-    /// Combined convenience method mirroring `VoipAec3::process`.
-    ///
-    /// Parameters
-    /// ----------
-    /// py : Python
-    /// capture_frame : numpy.ndarray
-    ///     1D float32 array, length = frame_samples * capture_channels
-    /// render_frame : Optional[numpy.ndarray]
-    ///     1D float32 array, length = frame_samples * render_channels
-    /// level_change : bool, optional
-    ///
-    /// Returns
-    /// -------
-    /// (out_frame, metrics)
-    ///   out_frame : numpy.ndarray (float32, same length as capture_frame)
-    ///   metrics   : Metrics
     #[pyo3(signature = (capture_frame, render_frame=None, level_change=false))]
     fn process<'py>(
         &mut self,
@@ -303,8 +330,6 @@ impl PyAec3 {
     }
 }
 
-/// Python module init.
-/// The name here (`aec3_py_tunable`) must match the `[lib].name` in Cargo.toml.
 #[pymodule]
 fn aec3_py_tunable(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyAec3>()?;

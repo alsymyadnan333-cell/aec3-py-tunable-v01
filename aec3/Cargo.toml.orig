@@ -1,0 +1,23 @@
+[package]
+name = "aec3"
+version = "0.1.1"
+edition = "2024"
+authors = ["Angelos-Ermis Mangos"]
+license = "MIT OR BSD-3-Clause"
+description = "An acoustic echo canceller written in rust based on the WebRTC aec3 project"
+repository = "https://github.com/RubyBit/aec3-rs"
+
+[dependencies]
+nalgebra = "0.34.1"
+num-complex = "0.4.6"
+rustfft = "6.4.1"
+crossbeam-channel = "0.5.15"
+log = "0.4"
+
+[dev-dependencies]
+anyhow = "1.0.100"
+hound = "3"
+cpal = { git = "https://github.com/RustAudio/cpal.git" }
+ctrlc = "3"
+
+

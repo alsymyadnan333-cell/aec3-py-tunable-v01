@@ -14,8 +14,8 @@ pyo3 = { version = "0.27", features = ["extension-module"] }
 # NumPy bindings for PyO3
 numpy = "0.27"
 
-# AEC3 crate pinned strictly to 0.1.1
-aec3 = "=0.1.1"
+# AEC3 crate pinned strictly to 0.1.1 (vendored with non-invasive observability)
+aec3 = { path = "./aec3", version = "=0.1.1" }
 
 [profile.release]
 lto = true
